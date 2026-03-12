@@ -1,0 +1,1 @@
+{"ts": "2025-12-09T17:24:48.261915", "owner": "d17502db-fcec-4821-b72a-119564cc6955", "model_sha": "MLFLOW-315c2a4334914d53a5dd86a77de6b039", "model": "MLFLOW-315c2a4334914d53a5dd86a77de6b039_LogReg_Test_V1_RETRAINED_202512091723", "input": [0.1, 0.2, 0.3, 0.4], "pred": 1}

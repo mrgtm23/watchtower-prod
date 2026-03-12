@@ -1,0 +1,123 @@
+version: "3.8"
+services:
+  api:
+    build: 
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: watchtower_api
+    env_file:
+      - .env
+    environment:
+      # CRITICAL: Inject MinIO credentials into the API container
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      
+      # Inject the MinIO Endpoint for the Boto3 client in the API container
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - minio
+      - mlflow
+    volumes:
+      - .:/app
+    networks:
+      - watchnet
+
+  db:
+    image: postgres:14
+    container_name: watchtower_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - watchnet
+
+  minio:
+    image: minio/minio:latest
+    container_name: watchtower_minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - watchnet
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: watchtower_mlflow
+    working_dir: /workspace
+    # volumes:
+    #   - ./mlflow_artifacts:/workspace/mlruns
+    
+    # --- ADD THESE MINIO/S3 CONNECTION VARS ---
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_S3_IGNORE_TLS: true
+    command: bash -c "pip install mlflow==2.11.3 boto3 && mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root s3://mlflow-artifacts --host 0.0.0.0 --port 5000"
+    ports:
+      - "5000:5000"
+    depends_on:
+      - minio
+    networks:
+      - watchnet
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: watchtower_prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - watchnet
+
+  grafana:
+    image: grafana/grafana:9.5.2
+    container_name: watchtower_grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+    ports:
+      - "3000:3000"
+    networks:
+      - watchnet
+    depends_on:
+      - prometheus
+    volumes:
+      - ./grafana_data:/var/lib/grafana
+  
+  ui:
+    build: 
+      context: ./watchtower-ui # Points to the new UI directory
+    container_name: watchtower_ui
+    env_file:
+      - .env
+    ports:
+      - "8501:8501" # Expose Streamlit's default port
+    depends_on:
+      - api # Ensure the API is running before the UI starts
+    networks:
+      - watchnet
+
+volumes:
+  db_data:
+  minio_data:
+  mlflow_artifacts:
+
+networks:
+  watchnet:
+    driver: bridge
